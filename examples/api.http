@@ -222,3 +222,32 @@ GET {{host}}/api/voyages/{{id}}/discharge-reviews
 ### 取某次卸货审查的冻结结果
 @reviewId = 00000000-0000-0000-0000-000000000000
 GET {{host}}/api/discharge-reviews/{{reviewId}}
+
+### ========== 靠泊窗口预订（依据已留档卸货审查）==========
+
+### 预订：审查内卸港 + 泊位 + 带时区起止时刻 + 提交号
+### 受理前提：该港在审查中有实际卸箱且无受阻箱（否则 422 port_not_dischargeable）；
+### 起点须严格早于终点（否则 409 invalid_time_range），时刻必须带时区（否则 400）；
+### 同港同泊位有效窗口不得重叠（跨航次亦然，首尾相接可用；重叠 409 berth_window_overlap）；
+### 同审查同卸港至多一个有效预订（409 active_booking_exists）；
+### 同提交号同内容重试 replay:true 返回原预订当前状态，改内容 409 submission_no_conflict。
+POST {{host}}/api/discharge-reviews/{{reviewId}}/berth-bookings
+Content-Type: application/json
+
+{
+  "dischargePort": "SHA",
+  "berth": "B-01",
+  "startAt": "2026-10-10T08:00:00Z",
+  "endAt": "2026-10-10T12:00:00Z",
+  "submissionNo": "SUB-0001"
+}
+
+### 按审查列出预订与状态（含已取消记录）
+GET {{host}}/api/discharge-reviews/{{reviewId}}/berth-bookings
+
+### 取单条预订
+@bookingId = 00000000-0000-0000-0000-000000000000
+GET {{host}}/api/berth-bookings/{{bookingId}}
+
+### 取消预订（保留记录、释放占用；重复取消 replay:true 返回已取消状态；重订须新提交号）
+POST {{host}}/api/berth-bookings/{{bookingId}}/cancel

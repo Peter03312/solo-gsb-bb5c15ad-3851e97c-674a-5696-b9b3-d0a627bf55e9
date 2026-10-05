@@ -4,10 +4,12 @@ import { VoyageService } from '../service';
 import { CheckService } from '../check-service';
 import { PlanService } from '../plan-service';
 import { DischargeService } from '../discharge-service';
+import { BerthBookingService } from '../berth-service';
 import { HttpError } from '../errors';
 import {
   applyMovesSchema,
   checkReportSchema,
+  createBerthBookingSchema,
   createDischargeReviewSchema,
   createPlanSchema,
   createVoyageSchema,
@@ -24,6 +26,7 @@ export function createApiRouter(
   checkService: CheckService,
   planService: PlanService,
   dischargeService: DischargeService,
+  berthBookingService: BerthBookingService,
 ): Router {
   const router = Router();
 
@@ -162,6 +165,39 @@ export function createApiRouter(
     dischargeService.getReview(reviewId).then((v) => res.json(v)).catch(next);
   });
 
+  // ---- 靠泊窗口预订（依据已留档的卸货审查）----
+
+  // 按审查列出预订与状态（含已取消记录）
+  router.get('/discharge-reviews/:reviewId/berth-bookings', (req, res, next) => {
+    const reviewId = parseReviewId(req);
+    berthBookingService.listByReview(reviewId).then((v) => res.json(v)).catch(next);
+  });
+
+  // 依据审查提交靠泊窗口预订（同提交号同内容幂等、改内容 409）
+  router.post('/discharge-reviews/:reviewId/berth-bookings', (req, res, next) => {
+    const reviewId = parseReviewId(req);
+    const input = parseBody(createBerthBookingSchema, req.body);
+    berthBookingService
+      .createBooking(reviewId, input)
+      .then((r) => res.status(r.replay ? 200 : 201).json({ replay: r.replay, ...r.booking }))
+      .catch(next);
+  });
+
+  // 取单条预订（含状态）
+  router.get('/berth-bookings/:bookingId', (req, res, next) => {
+    const bookingId = parseBookingId(req);
+    berthBookingService.getBooking(bookingId).then((v) => res.json(v)).catch(next);
+  });
+
+  // 取消预订：保留记录、释放占用；重复取消返回已取消状态
+  router.post('/berth-bookings/:bookingId/cancel', (req, res, next) => {
+    const bookingId = parseBookingId(req);
+    berthBookingService
+      .cancelBooking(bookingId)
+      .then((r) => res.status(200).json({ replay: r.replay, ...r.booking }))
+      .catch(next);
+  });
+
   // ---- 现场装船核对 ----
 
   // 航次下的核对作业列表
@@ -286,6 +322,14 @@ export function createApiRouter(
     const id = req.params['reviewId'] ?? '';
     if (!UUID_RE.test(id)) {
       throw HttpError.badRequest('invalid_discharge_review_id', `卸货审查 ID 格式非法: ${id}`);
+    }
+    return id;
+  }
+
+  function parseBookingId(req: Request): string {
+    const id = req.params['bookingId'] ?? '';
+    if (!UUID_RE.test(id)) {
+      throw HttpError.badRequest('invalid_berth_booking_id', `靠泊预订 ID 格式非法: ${id}`);
     }
     return id;
   }

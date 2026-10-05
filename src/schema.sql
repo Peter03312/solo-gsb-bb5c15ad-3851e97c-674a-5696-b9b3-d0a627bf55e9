@@ -245,3 +245,56 @@ CREATE TABLE IF NOT EXISTS discharge_reviews (
 );
 CREATE INDEX IF NOT EXISTS idx_discharge_reviews_manifest
     ON discharge_reviews (voyage_id, manifest_rev, created_at);
+
+-- ---- 卸货审查留档后的靠泊窗口预订（berth window booking）----
+-- 港口调度员依据【已留档的卸货审查】为某卸港预订靠泊窗口：
+-- 仅当该港在审查模拟中“有实际卸箱（discharged 非空）且无受阻箱（blocked 为空）”才受理。
+-- 受理时冻结审查所依据的清单修订号（manifest_rev）与该港实际卸箱数（discharged_box_count）：
+-- 审查本身在创建时已永久留档，后续航次调整或签发新清单均不回写预订；取消也不删除记录。
+--
+-- 并发竞争由数据库约束兜底（行级安全，跨连接/跨事务生效，即使来自不同航次）：
+--  1. 部分排他约束：同卸港同泊位的【有效】窗口时间区间不得重叠；
+--     tstzrange 默认下界含、上界不含（[,)），故首尾相接（a.end = b.start）不冲突；
+--  2. 部分唯一索引：同一审查同一卸港至多一个有效预订；
+--  3. 普通唯一：提交号在同一审查内唯一（同号同内容重试由服务层幂等返回原预订）。
+-- btree_gist 为排他约束的等值列（discharge_port/berth）提供 GiST 支持。
+CREATE EXTENSION IF NOT EXISTS btree_gist;
+
+CREATE TABLE IF NOT EXISTS berth_bookings (
+    id                   UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    review_id            UUID NOT NULL REFERENCES discharge_reviews(id) ON DELETE CASCADE,
+    -- 冗余审查所属航次/清单修订号与提交内容，便于按审查查询与冻结快照展示
+    voyage_id            UUID NOT NULL,
+    manifest_rev         INTEGER NOT NULL CHECK (manifest_rev >= 0),
+    discharge_port       TEXT NOT NULL,
+    berth                TEXT NOT NULL,
+    -- 带时区的起止时刻（TIMESTAMPTZ 存绝对时刻）；CHECK 保证起点严格早于终点
+    start_at             TIMESTAMPTZ NOT NULL,
+    end_at               TIMESTAMPTZ NOT NULL,
+    submission_no        TEXT NOT NULL,
+    -- 受理时冻结：审查所依据的清单修订号与该港实际卸箱数（后续不回写）
+    discharged_box_count INTEGER NOT NULL CHECK (discharged_box_count > 0),
+    status               TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'cancelled')),
+    created_at           TIMESTAMPTZ NOT NULL DEFAULT now(),
+    cancelled_at         TIMESTAMPTZ,
+    -- 提交内容指纹：用于“同提交号重试”时判断同内容（幂等）还是改内容（冲突）
+    request_hash         TEXT NOT NULL,
+    CHECK (start_at < end_at),
+    -- 提交号在同一审查内唯一（含已取消记录：同号不可复用，重新预订须用新提交号）
+    UNIQUE (review_id, submission_no),
+    -- 同港同泊位的有效窗口不得重叠（首尾相接可用）；不同卸港/不同泊位互不影响
+    CONSTRAINT berth_bookings_no_overlap
+        EXCLUDE USING gist (
+            discharge_port WITH =,
+            berth WITH =,
+            tstzrange(start_at, end_at, '[)') WITH &&
+        ) WHERE (status = 'active')
+);
+
+-- 同一审查同一卸港至多一个有效预订（取消后可在同审查同港重新预订）
+CREATE UNIQUE INDEX IF NOT EXISTS uq_berth_bookings_one_active_per_review_port
+    ON berth_bookings (review_id, discharge_port)
+    WHERE status = 'active';
+
+CREATE INDEX IF NOT EXISTS idx_berth_bookings_review
+    ON berth_bookings (review_id, created_at);

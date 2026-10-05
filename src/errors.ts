@@ -46,4 +46,9 @@ export class HttpError extends Error {
   static invalidRequest(code: string, message: string, details?: unknown): HttpError {
     return new HttpError(400, code, message, details);
   }
+
+  /** 422 Unprocessable Entity：请求格式合法但业务前提不满足（如该港不可卸） */
+  static unprocessable(code: string, message: string, details?: unknown): HttpError {
+    return new HttpError(422, code, message, details);
+  }
 }

@@ -160,3 +160,29 @@ export const createDischargeReviewSchema = z
     ),
   })
   .transform((d) => ({ ports: d.ports, items: d.items }));
+
+// ---- 靠泊窗口预订（依据已留档的卸货审查）----
+
+/**
+ * 带时区的 ISO 8601 时刻：要求显式时区（Z 或 ±HH:MM），例如
+ * "2026-10-05T08:00:00Z" / "2026-10-05T16:00:00+08:00"。
+ * 无时区的裸时间串会被拒绝（非法时刻），避免时区歧义。
+ */
+const zonedDateTime = z
+  .string()
+  .trim()
+  .min(1, '时刻不能为空')
+  .regex(/(Z|[+-]\d{2}:\d{2})$/i, '时刻必须带显式时区（Z 或 ±HH:MM）')
+  .refine((s) => !Number.isNaN(Date.parse(s)), '时刻无法解析为合法日期时间');
+
+/**
+ * 预订靠泊窗口：提交审查内卸港、泊位、带时区起止时刻与提交号。
+ * 起点须严格早于终点、同号同内容幂等/改内容冲突、窗口重叠等规则由服务层与数据库约束裁决。
+ */
+export const createBerthBookingSchema = z.object({
+  dischargePort: z.string().trim().min(1, '卸港不能为空').max(64),
+  berth: z.string().trim().min(1, '泊位不能为空').max(64),
+  startAt: zonedDateTime,
+  endAt: zonedDateTime,
+  submissionNo: z.string().trim().min(1, '提交号不能为空').max(64),
+});
