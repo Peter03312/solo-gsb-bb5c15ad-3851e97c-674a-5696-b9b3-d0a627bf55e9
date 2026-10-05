@@ -9,12 +9,13 @@
     "build": "tsc -p tsconfig.json",
     "start": "node dist/start.js",
     "dev": "tsx watch src/start.ts",
-    "test": "node --require tsx/cjs --test test/validator.test.ts test/check.test.ts test/merge.test.ts test/discharge.test.ts",
+    "test": "node --require tsx/cjs --test test/validator.test.ts test/check.test.ts test/merge.test.ts test/discharge.test.ts test/berthing.test.ts",
     "e2e": "node test/e2e.js",
     "e2e:check": "node test/e2e-check.js",
     "e2e:plans": "node test/e2e-plans.js",
     "e2e:migrate": "node test/e2e-migrate.js",
     "e2e:discharge": "node test/e2e-discharge.js",
+    "e2e:berth": "node test/e2e-berth.js",
     "demo": "tsx examples/demo.ts"
   },
   "dependencies": {

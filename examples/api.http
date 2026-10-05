@@ -222,3 +222,44 @@ GET {{host}}/api/voyages/{{id}}/discharge-reviews
 ### 取某次卸货审查的冻结结果
 @reviewId = 00000000-0000-0000-0000-000000000000
 GET {{host}}/api/discharge-reviews/{{reviewId}}
+
+### ========== 靠泊窗口预订（依据已留档卸货审查）==========
+
+### 预订靠泊窗口（该港须有实际卸箱且无受阻箱；首次 201）
+POST {{host}}/api/discharge-reviews/{{reviewId}}/berth-bookings
+Content-Type: application/json
+
+{
+  "reviewId": "00000000-0000-0000-0000-000000000000",
+  "dischargePort": "SIN",
+  "berth": "B-7",
+  "startAt": "2026-10-10T08:00:00+08:00",
+  "endAt": "2026-10-10T12:00:00+08:00",
+  "submissionNo": "SUB-001"
+}
+
+### 同号同内容重试（等效时区，同一绝对时刻）-> 200 replay:true，返回原预订当前状态
+POST {{host}}/api/discharge-reviews/{{reviewId}}/berth-bookings
+Content-Type: application/json
+
+{
+  "reviewId": "00000000-0000-0000-0000-000000000000",
+  "dischargePort": "SIN",
+  "berth": "B-7",
+  "startAt": "2026-10-10T00:00:00Z",
+  "endAt": "2026-10-10T04:00:00Z",
+  "submissionNo": "SUB-001"
+}
+
+### 按审查查询预订与状态
+GET {{host}}/api/discharge-reviews/{{reviewId}}/berth-bookings
+
+### 按航次查询预订与状态
+GET {{host}}/api/voyages/{{id}}/berth-bookings
+
+### 取单条靠泊预订
+@bookingId = 00000000-0000-0000-0000-000000000000
+GET {{host}}/api/berth-bookings/{{bookingId}}
+
+### 取消预订（保留记录、释放占用；重复取消 replay:true）
+POST {{host}}/api/berth-bookings/{{bookingId}}/cancel

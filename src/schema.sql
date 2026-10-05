@@ -245,3 +245,70 @@ CREATE TABLE IF NOT EXISTS discharge_reviews (
 );
 CREATE INDEX IF NOT EXISTS idx_discharge_reviews_manifest
     ON discharge_reviews (voyage_id, manifest_rev, created_at);
+
+-- ---- 靠泊窗口预订（berth window booking）----
+-- 港口调度员依据【已留档的卸货审查】预订靠泊窗口：提交审查 ID、审查内某一卸港、
+-- 泊位、带时区的起止时刻与提交号。仅当该港在审查模拟中确有实际卸箱且无受阻箱时受理。
+-- 受理时冻结清单修订号与该港实际卸箱数（快照随预订永久保存，审查/清单后续调整不回写）。
+--
+-- 关键约束（均由数据库保证，跨航次同样生效）：
+--  - (review_id, submission_no) 唯一：提交号在同一审查内唯一，支撑“同号同内容重试”幂等；
+--  - 同审查同一卸港至多一个有效预订（部分唯一索引，仅 booked 状态参与）；
+--  - 同港同泊位的【有效】窗口不得重叠（排他约束，半开区间 [start, end)：首尾相接可用），
+--    即使窗口来自不同航次的不同审查；取消（status='cancelled'）后记录保留且立即释放占用；
+--  - 并发竞争时排他约束保证只有一个事务能插入成功，其余收到唯一/排他冲突 -> 409。
+CREATE EXTENSION IF NOT EXISTS btree_gist;
+
+CREATE TABLE IF NOT EXISTS berth_bookings (
+    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    review_id       UUID NOT NULL REFERENCES discharge_reviews(id) ON DELETE CASCADE,
+    -- 冗余航次（取自审查），便于按航次查询预订
+    voyage_id       UUID NOT NULL REFERENCES voyages(id) ON DELETE CASCADE,
+    -- 审查内的卸港（必须是该审查模拟中实际有卸箱且无受阻的港）
+    discharge_port  TEXT NOT NULL,
+    berth           TEXT NOT NULL,
+    start_at        TIMESTAMPTZ NOT NULL,
+    end_at          TIMESTAMPTZ NOT NULL,
+    -- 客户端提交号：同一审查内唯一（幂等键，同号同内容重试返回原预订当前状态）
+    submission_no   TEXT NOT NULL,
+    status          TEXT NOT NULL DEFAULT 'booked' CHECK (status IN ('booked', 'cancelled')),
+    -- 受理时刻冻结的审查快照（后续审查调整或签发新清单均不回写）
+    manifest_rev    INTEGER NOT NULL CHECK (manifest_rev >= 0),
+    port_box_count  INTEGER NOT NULL CHECK (port_box_count > 0),
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    cancelled_at    TIMESTAMPTZ,
+    UNIQUE (review_id, submission_no),
+    CHECK (start_at < end_at)
+);
+
+-- 同审查同一卸港至多一个【有效】预订（取消后允许用新提交号重新预订）
+DO $$
+BEGIN
+    CREATE UNIQUE INDEX IF NOT EXISTS uq_berth_booking_active_review_port
+        ON berth_bookings (review_id, discharge_port)
+        WHERE status = 'booked';
+EXCEPTION WHEN duplicate_table THEN NULL;
+END $$;
+
+-- 同港同泊位有效窗口不得重叠（排他约束，半开区间 [start_at, end_at)：首尾相接可用）。
+-- 跨审查、跨航次同名港+同名泊位同样互斥；谓词 status='booked' 使取消记录不参与，占用随之释放。
+-- btree_gist 为文本列提供支持 = 的 GiST 操作类；range 的 && 由内建 range 操作类提供。
+-- 用命名约束 + 目录判空实现幂等（排他约束不能写成普通 CREATE INDEX ... WITH =）。
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint WHERE conname = 'excl_berth_booking_port_berth_window'
+    ) THEN
+        ALTER TABLE berth_bookings
+            ADD CONSTRAINT excl_berth_booking_port_berth_window
+            EXCLUDE USING gist (
+                discharge_port WITH =,
+                berth WITH =,
+                tstzrange(start_at, end_at, '[)') WITH &&
+            ) WHERE (status = 'booked');
+    END IF;
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+
+CREATE INDEX IF NOT EXISTS idx_berth_bookings_review ON berth_bookings (review_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_berth_bookings_voyage ON berth_bookings (voyage_id, created_at);

@@ -5,6 +5,7 @@ import { VoyageService } from './service';
 import { CheckService } from './check-service';
 import { PlanService } from './plan-service';
 import { DischargeService } from './discharge-service';
+import { BerthBookingService } from './berth-service';
 import { ping } from './db';
 
 export function createApp(pool: Pool): express.Express {
@@ -23,7 +24,11 @@ export function createApp(pool: Pool): express.Express {
   const checkService = new CheckService(pool);
   const planService = new PlanService(pool);
   const dischargeService = new DischargeService(pool);
-  app.use('/api', createApiRouter(service, checkService, planService, dischargeService));
+  const berthBookingService = new BerthBookingService(pool);
+  app.use(
+    '/api',
+    createApiRouter(service, checkService, planService, dischargeService, berthBookingService),
+  );
 
   app.use((_req, res) => {
     res.status(404).json({ error: { code: 'route_not_found', message: '接口不存在' } });

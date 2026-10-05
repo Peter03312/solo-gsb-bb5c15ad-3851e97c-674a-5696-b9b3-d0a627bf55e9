@@ -142,6 +142,25 @@ export const checkReportSchema = z.object({
 // ---- 港序卸货审查 ----
 
 /**
+ * 靠泊窗口预订（依据已留档卸货审查）：
+ *  - reviewId：审查 ID（路径外亦可校验；这里随体提交）；
+ *  - dischargePort/berth：审查内卸港与泊位（港是否可卸由业务层按冻结模拟结果判定）；
+ *  - startAt/endAt：带时区时刻，具体形态（必须含时区）与起点早于终点由业务层校验，
+ *    给出 invalid_time_window 的明确错误；
+ *  - submissionNo：同一审查内唯一的提交号（同号同内容重试幂等）。
+ */
+export const createBerthBookingSchema = z
+  .object({
+    reviewId: z.string().trim().min(1, '卸货审查 ID 不能为空'),
+    dischargePort: z.string().trim().min(1, '卸港不能为空').max(64),
+    berth: z.string().trim().min(1, '泊位不能为空').max(64),
+    startAt: z.string().trim().min(1, '起始时刻不能为空'),
+    endAt: z.string().trim().min(1, '结束时刻不能为空'),
+    submissionNo: z.string().trim().min(1, '提交号不能为空').max(64),
+  })
+  .transform((d) => ({ ...d }));
+
+/**
  * 对已签发冻结清单提交卸货审查：
  *  - ports：有序卸港列表（业务层再查空/重复；空数组直接非法）；
  *  - items：清单内每个箱的卸港（箱号集合必须与清单完全一致，业务层校验）。
